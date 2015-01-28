@@ -47,10 +47,7 @@
 #include "freeRTOSdebug.h"
 #include "uart_syslink.h"
 #include "comm.h"
-#include "stabilizer.h"
-#include "commander.h"
-//Ben's version needs to delete above two lines
-//Ben's version needs: #include "supervisor.h"
+#include "supervisor.h
 #include "neopixelring.h"
 #include "console.h"
 #include "usb.h"

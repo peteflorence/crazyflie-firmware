@@ -60,7 +60,11 @@
 
 xSemaphoreHandle i2cdevDmaEventI2c1;
 xSemaphoreHandle i2cdevDmaEventI2c2;
-
+/* Buffer of data to be received by I2C1 */
+uint8_t* Buffer_Rx1;
+/* Buffer of data to be transmitted by I2C1 */
+uint8_t* Buffer_Tx1;
+__IO uint32_t I2CDirection;
 static void i2cdevResetAndLowLevelInitBusI2c1(void);
 static void i2cdevResetAndLowLevelInitBusI2c2(void);
 static inline void i2cdevRuffLoopDelay(uint32_t us);

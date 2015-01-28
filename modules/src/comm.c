@@ -35,14 +35,10 @@
 #include "param.h"
 #include "log.h"
 #include "eskylink.h"
-<<<<<<< HEAD
-#include "uart.h"
-#include "mem.h"
-=======
 #include "radiolink.h"
 #include "usblink.h"
 #include "platformservice.h"
->>>>>>> crazyflie2
+
 
 static bool isInit;
 
@@ -69,11 +65,7 @@ void commInit(void)
 #endif
 
   crtpserviceInit();
-<<<<<<< HEAD
-  memInit();
-=======
   platformserviceInit();
->>>>>>> crazyflie2
   logInit();
   consoleInit();
   paramInit();
@@ -100,7 +92,6 @@ bool commTest(void)
   //pass &= nrf24linkTest();
   #endif
   
-  pass &= memTest();
   pass &= crtpTest();
   pass &= crtpserviceTest();
   pass &= platformserviceTest();

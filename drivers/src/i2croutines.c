@@ -32,12 +32,8 @@
 
 extern xSemaphoreHandle i2cdevDmaEventI2c1;
 extern xSemaphoreHandle i2cdevDmaEventI2c2;
-/* Buffer of data to be received by I2C1, I2C2 */
-uint8_t* Buffer_Rx1;
-uint8_t* Buffer_Tx1;
-/* Buffer of data to be transmitted by I2C1, I2C2 */
-uint8_t* Buffer_Rx2;
-uint8_t* Buffer_Tx2;
+extern uint8_t* Buffer_Rx1;
+extern uint8_t* Buffer_Tx1;
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
