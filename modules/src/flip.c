@@ -9,20 +9,26 @@
 #include "system.h"
 #include "debug.h"
 
+#define MAX_THROTTLE 60000
+#define FLIP_TIME    200
+
 struct ThrustCrtpValues
 {
   uint16_t thrust1;
   uint16_t thrust2;
   uint16_t thrust3;
   uint16_t thrust4;
+  uint16_t maxThrottle;
 } __attribute__((packed));
 
 #define THRUSTS_UPDATE_FREQ 500
 
+static int thrustInterval = 100;
 static bool isInit;
 static bool isInactive;
 static uint32_t lastUpdate;
 static struct ThrustCrtpValues thrustsCmd;
+
 
 static void flipCrtpCB(CRTPPacket* pk);
 void flipTask(void* param);
@@ -81,11 +87,20 @@ static void flipWatchdogReset(void)
 
 static void updateThrusts(void)
 {
+  
+  uint32_t flipstart = xTaskGetTickCount();
   flipWatchdog();
-  motorsSetRatio(MOTOR_M1,(uint32_t) thrustsCmd.thrust1);
-  motorsSetRatio(MOTOR_M2,(uint32_t) thrustsCmd.thrust2);
-  motorsSetRatio(MOTOR_M3,(uint32_t) thrustsCmd.thrust3);
-  motorsSetRatio(MOTOR_M4,(uint32_t) thrustsCmd.thrust4);
+  motorsSetRatio(MOTOR_M1,(uint32_t) MAX_THROTTLE);
+  motorsSetRatio(MOTOR_M2,(uint32_t) MAX_THROTTLE);
+  motorsSetRatio(MOTOR_M3,(uint32_t) 0);
+  motorsSetRatio(MOTOR_M4,(uint32_t) 0);
+
+  uint32_t fliptime; 
+  while (1)
+    fliptime = xTaskGetTickCount() - flipstart;
+    if (fliptime > FLIP_TIME)
+      startStabilizer();
+
 }
 
 void flipTask(void* param)

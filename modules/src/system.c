@@ -50,6 +50,7 @@
 #include "stabilizer.h"
 #include "commander.h"
 #include "neopixelring.h"
+#include "supervisor.h"
 #include "console.h"
 #include "usb.h"
 #include "expbrd.h"
@@ -137,8 +138,7 @@ void systemTask(void *arg)
               *((int*)(MCU_ID_ADDRESS+8)), *((int*)(MCU_ID_ADDRESS+4)),
               *((int*)(MCU_ID_ADDRESS+0)), *((short*)(MCU_FLASH_SIZE_ADDRESS)));
 
-  commanderInit();
-  stabilizerInit();
+  supervisorInit();
   expbrdInit();
   memInit();
   
@@ -146,8 +146,7 @@ void systemTask(void *arg)
   pass &= systemTest();
   pass &= configblockTest();
   pass &= commTest();
-  pass &= commanderTest();
-  pass &= stabilizerTest();
+  pass &= supervisorTest();
   pass &= expbrdTest();
   pass &= memTest();
   
