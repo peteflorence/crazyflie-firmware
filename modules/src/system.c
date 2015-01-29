@@ -47,7 +47,7 @@
 #include "freeRTOSdebug.h"
 #include "uart_syslink.h"
 #include "comm.h"
-#include "supervisor.h
+#include "supervisor.h"
 #include "neopixelring.h"
 #include "console.h"
 #include "usb.h"
