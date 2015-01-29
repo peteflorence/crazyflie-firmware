@@ -1,9 +1,9 @@
-#define DEBUG_MODULE "OFFBOARDCTRL"
+#define DEBUG_MODULE "FLIP"
 
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include "offboardctrl.h"
+#include "flip.h"
 #include "crtp.h"
 #include "motors.h"
 #include "system.h"
@@ -24,26 +24,26 @@ static bool isInactive;
 static uint32_t lastUpdate;
 static struct ThrustCrtpValues thrustsCmd;
 
-static void offboardCtrlCrtpCB(CRTPPacket* pk);
-void offboardCtrlTask(void* param);
-static void offboardCtrlWatchdogReset(void);
+static void flipCrtpCB(CRTPPacket* pk);
+void flipTask(void* param);
+static void flipWatchdogReset(void);
 static void updateThrusts(void);
 
-void offboardCtrlInit(void)
+void flipInit(void)
 {
   if(isInit)
     return;
 
   crtpInit();
   motorsInit();
-  crtpRegisterPortCB(CRTP_PORT_OFFBOARDCTRL, offboardCtrlCrtpCB);
+  crtpRegisterPortCB(CRTP_PORT_FLIP, flipCrtpCB);
 
   lastUpdate = xTaskGetTickCount();
-  isInactive = TRUE;
-  isInit = TRUE;
+  isInactive = true;
+  isInit = true;
 }
 
-bool offboardCtrlTest(void)
+bool flipTest(void)
 {
   bool pass = true;
   pass &= crtpTest();
@@ -51,46 +51,46 @@ bool offboardCtrlTest(void)
   return pass;
 }
 
-static void offboardCtrlCrtpCB(CRTPPacket* pk)
+static void flipCrtpCB(CRTPPacket* pk)
 {
   thrustsCmd = *((struct ThrustCrtpValues*)pk->data);
-  offboardCtrlWatchdogReset();
+  flipWatchdogReset();
 }
 
-void offboardCtrlWatchdog(void)
+void flipWatchdog(void)
 {
   uint32_t ticktimeSinceUpdate = xTaskGetTickCount() - lastUpdate;
-  if (ticktimeSinceUpdate > OFFBOARDCTRL_WDT_TIMEOUT_SHUTDOWN)
+  if (ticktimeSinceUpdate > FLIP_WDT_TIMEOUT_SHUTDOWN)
   {
     thrustsCmd.thrust1 = 0;
     thrustsCmd.thrust2 = 0;
     thrustsCmd.thrust3 = 0;
     thrustsCmd.thrust4 = 0;
-    isInactive = TRUE;
+    isInactive = true;
   }
   else
   {
-    isInactive = FALSE;
+    isInactive = true;
   }
 }
 
-static void offboardCtrlWatchdogReset(void)
+static void flipWatchdogReset(void)
 {
   lastUpdate = xTaskGetTickCount();
 }
 
 static void updateThrusts(void)
 {
-  offboardCtrlWatchdog();
+  flipWatchdog();
   motorsSetRatio(MOTOR_M1,(uint32_t) thrustsCmd.thrust1);
   motorsSetRatio(MOTOR_M2,(uint32_t) thrustsCmd.thrust2);
   motorsSetRatio(MOTOR_M3,(uint32_t) thrustsCmd.thrust3);
   motorsSetRatio(MOTOR_M4,(uint32_t) thrustsCmd.thrust4);
 }
 
-void offboardCtrlTask(void* param)
+void flipTask(void* param)
 {
-  vTaskSetApplicationTaskTag(0, (void*)TASK_OFFBOARDCTRL_ID_NBR);
+  vTaskSetApplicationTaskTag(0, (void*)TASK_FLIP_ID_NBR);
   systemWaitStart();
   uint32_t lastWakeTime = xTaskGetTickCount();
   while(1)
