@@ -177,6 +177,13 @@ int crtpSendPacket(CRTPPacket *p)
   return xQueueSend(txQueue, p, 0);
 }
 
+void crtpSendPacketNoWait(CRTPPacket *p)
+{
+  ASSERT(p); 
+  
+  link->sendPacket(p);
+}
+
 int crtpSendPacketBlock(CRTPPacket *p)
 {
   ASSERT(p); 

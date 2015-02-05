@@ -28,6 +28,9 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
+#include "math.h"
+#include "string.h"
+
 #include "config.h"
 #include "system.h"
 #include "pm.h"
@@ -117,7 +120,6 @@ static uint16_t altHoldMinThrust    = 00000; // minimum hover thrust - not used 
 static uint16_t altHoldBaseThrust   = 43000; // approximate throttle needed when in perfect hover. More weight/older battery can use a higher value
 static uint16_t altHoldMaxThrust    = 60000; // max altitude hold thrust
 
-
 RPYType rollType;
 RPYType pitchType;
 RPYType yawType;
@@ -132,13 +134,16 @@ uint32_t motorPowerM2;
 uint32_t motorPowerM1;
 uint32_t motorPowerM3;
 
+static CRTPPacket p;
+
 static bool isInit;
 
 static void stabilizerAltHoldUpdate(void);
 static void distributePower(const uint16_t thrust, const int16_t roll,
                             const int16_t pitch, const int16_t yaw);
 static uint16_t limitThrust(int32_t value);
-static void stabilizerTask(void* param);
+void stabilizerUpdateEuler(void);
+void stabilizerTask(void* param);
 static float constrain(float value, const float minVal, const float maxVal);
 static float deadband(float value, const float threshold);
 
@@ -174,7 +179,30 @@ bool stabilizerTest(void)
   return pass;
 }
 
-static void stabilizerTask(void* param)
+void stabilizerUpdateEuler(void)
+{
+  // Magnetometer not yet used more then for logging.
+  imu9Read(&gyro, &acc, &mag);
+  if (imu6IsCalibrated())
+  {
+
+    sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, FUSION_UPDATE_DT);
+    sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
+
+    p.header=CRTP_HEADER(CRTP_PORT_SENSORS, 0);
+    p.size = 6*4;
+    memcpy(p.data,&eulerRollActual,4);
+    memcpy(p.data+4,&eulerPitchActual,4);
+    memcpy(p.data+8,&eulerYawActual,4);
+    memcpy(p.data+12,&(gyro.x),4);
+    memcpy(p.data+16,&(gyro.y),4);
+    memcpy(p.data+20,&(gyro.z),4);
+    crtpSendPacketNoWait(&p);
+
+  }
+}
+
+void stabilizerTask(void* param)
 {
   uint32_t attitudeCounter = 0;
   uint32_t altHoldCounter = 0;

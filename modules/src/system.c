@@ -48,7 +48,7 @@
 #include "uart_syslink.h"
 #include "comm.h"
 #include "neopixelring.h"
-#include "supervisor.h"
+#include "offboardctrl.h"
 #include "console.h"
 #include "usb.h"
 #include "expbrd.h"
@@ -136,7 +136,7 @@ void systemTask(void *arg)
               *((int*)(MCU_ID_ADDRESS+8)), *((int*)(MCU_ID_ADDRESS+4)),
               *((int*)(MCU_ID_ADDRESS+0)), *((short*)(MCU_FLASH_SIZE_ADDRESS)));
 
-  supervisorInit();
+  offboardCtrlInit();
   expbrdInit();
   memInit();
   
@@ -144,7 +144,7 @@ void systemTask(void *arg)
   pass &= systemTest();
   pass &= configblockTest();
   pass &= commTest();
-  pass &= supervisorTest();
+  pass &= offboardCtrlTest();
   pass &= expbrdTest();
   pass &= memTest();
   

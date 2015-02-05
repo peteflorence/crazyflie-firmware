@@ -31,6 +31,7 @@
 void stabilizerInit(void);
 
 bool stabilizerTest(void);
-
+void stabilizerUpdateEuler(void);
+void stabilizerTask(void*);
 
 #endif /* STABALIZER_H_ */
