@@ -34,20 +34,14 @@ static float eulerRollActual;
 static float eulerPitchActual;
 static float eulerYawActual;
 
-static float eulerRollActualRad;
-static float eulerPitchActualRad;
-static float eulerYawActualRad;
+static float rpyX[3];
+static float rpyN[3];
+static float omegaX[3];
+static float omegaN[3];
 
-static float complex eulerRollComplexRad;
-static float complex eulerPitchComplexRad;
-static float complex eulerYawComplexRad;
-
-static float eulerRollRealRad;
-static float eulerPitchRealRad;
-static float eulerYawRealRad;
-
-static Axis3f gyroRad;
-static Axis3f gyroRealRad;  
+static float IMURotMatrix[3][3] = {{0.7071, -0.7071, 0},
+                                   {0.7071,  0.7071, 0},
+                                   {0,       0,      1}};
 
 static bool isInit;
 static bool isInactive;
@@ -70,6 +64,8 @@ static void offboardCtrlCrtpCB(CRTPPacket* pk);
 static void offboardCtrlWatchdogReset(void);
 static void updateSensors(float);
 static void updateThrusts(void);
+static void rotateGyro(float*, float*);
+static void rotateRPY(float*, float*);
 void offboardCtrlTask(void* param);
 
 #undef max
@@ -187,32 +183,81 @@ static void updateSensors(float dt)
     sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, dt);
     sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
     
-    eulerRollActualRad = eulerRollActual*M_PI/180.0;
-    eulerPitchActualRad = eulerPitchActual*M_PI/180.0;
-    eulerYawActualRad = eulerYawActual*M_PI/180.0;
-    eulerRollComplexRad = 0.0;//log((sqrt(2.0)*sin(eulerPitchActualRad)*0.5*I+cos(eulerRollActualRad)*cos(eulerPitchActualRad)+sqrt(2.0)*cos(eulerPitchActualRad)*sin(eulerRollActualRad)*0.5*I)/fabs(sqrt(2.0)*sin(eulerPitchActualRad)*0.5*I+cos(eulerRollActualRad)*cos(eulerPitchActualRad)+sqrt(2.0)*cos(eulerPitchActualRad)*sin(eulerRollActualRad)*0.5*I))*-I;
-    // Note the inversion of the pitch
-    eulerPitchComplexRad  = 0.0;//-log((sqrt(pow(cos(eulerRollActualRad),2.0)*pow(cos(eulerPitchActualRad),2.0)+pow(sqrt(2.0)*sin(eulerPitchActualRad)*(1.0/2.0)+sqrt(2.0)*cos(eulerPitchActualRad)*sin(eulerRollActualRad)*(1.0/2.0),2.0))+sqrt(2.0)*sin(eulerPitchActualRad)*0.5*I-sqrt(2.0)*cos(eulerPitchActualRad)*sin(eulerRollActualRad)*0.5*I)/fabs(sqrt(pow(cos(eulerRollActualRad),2.0)*pow(cos(eulerPitchActualRad),2.0)+pow(sqrt(2.0)*sin(eulerPitchActualRad)*(1.0/2.0)+sqrt(2.0)*cos(eulerPitchActualRad)*sin(eulerRollActualRad)*(1.0/2.0),2.0))+sqrt(2.0)*sin(eulerPitchActualRad)*0.5*I-sqrt(2.0)*cos(eulerPitchActualRad)*sin(eulerRollActualRad)*0.5*I))*-I;
-    eulerYawComplexRad= 0.0;//log(((cos(eulerYawActualRad)+sin(eulerYawActualRad)*I)*(cos(eulerRollActualRad)*I+cos(eulerPitchActualRad)+sin(eulerRollActualRad)*sin(eulerPitchActualRad)))/fabs((cos(eulerYawActualRad)+sin(eulerYawActualRad)*I)*(cos(eulerRollActualRad)*I+cos(eulerPitchActualRad)+sin(eulerRollActualRad)*sin(eulerPitchActualRad))))*-I;
-    eulerRollRealRad = creal(eulerRollComplexRad);
-    eulerPitchRealRad = creal(eulerPitchComplexRad);
-    eulerYawRealRad = creal(eulerYawComplexRad);
+    // make rpy with motor1 being front
+    rpyX[0] = eulerRollActual*M_PI/180.0;
+    rpyX[1] = eulerPitchActual*M_PI/180.0;
+    rpyX[2] = eulerYawActual*M_PI/180.0;
+    rotateRPY(rpyX,rpyN);
 
-    gyroRad.x = gyro.x*M_PI/180.0;
-    gyroRad.y = gyro.y*M_PI/180.0;
-    gyroRad.z = gyro.z*M_PI/180.0;
-    gyroRealRad.x = sqrt(2.0)*gyroRad.x*(1.0/2.0)-sqrt(2.0)*gyroRad.y*(1.0/2.0);
-    gyroRealRad.y = sqrt(2.0)*gyroRad.x*(1.0/2.0)+sqrt(2.0)*gyroRad.y*(1.0/2.0);
-    gyroRealRad.z = gyroRad.z;
+    // make omega with motor1 being front
+    omegaX[0] = gyro.x*M_PI/180.0;
+    omegaX[1] = gyro.y*M_PI/180.0;
+    omegaX[2] = gyro.z*M_PI/180.0;
+    rotateGyro(omegaX,omegaN);
 
-    memcpy(pk.data,&eulerRollActualRad,4);
-    memcpy(pk.data+4,&eulerPitchActualRad,4);
-    memcpy(pk.data+8,&eulerYawActualRad,4);
-    memcpy(pk.data+12,&(gyroRealRad.x),4);
-    memcpy(pk.data+16,&(gyroRealRad.y),4);
-    memcpy(pk.data+20,&(gyroRealRad.z),4);
+    // pitch is inverted
+    rpyN[1] = -rpyN[1];
+
+    memcpy(pk.data,&(rpyN[0]),4);
+    memcpy(pk.data+4,&(rpyN[1]),4);
+    memcpy(pk.data+8,&(rpyN[2]),4);
+    memcpy(pk.data+12,&(omegaN[0]),4);
+    memcpy(pk.data+16,&(omegaN[1]),4);
+    memcpy(pk.data+20,&(omegaN[2]),4);
     crtpSendPacketNoWait(&pk);
   }
+}
+
+static void rotateGyro(float* omega, float* rotomega)
+{
+  // IMURotMatrix*omega
+  int i;
+  int j;
+  for (i=0;i<3;i++)
+  {
+    rotomega[i] = 0;
+    for (j=0;j<3;j++)
+    {
+      rotomega[i] += IMURotMatrix[i][j]*omega[j];
+    }
+  }
+}
+
+static void rotateRPY(float* rpy, float* rotrpy)
+{
+
+  float rotmat[3][3]; 
+  rotmat[0][0] = cos(rpy[2])*cos(rpy[1]);
+  rotmat[0][1] = cos(rpy[2])*sin(rpy[1])*sin(rpy[0])-sin(rpy[2])*cos(rpy[0]);
+  rotmat[0][2] = cos(rpy[2])*sin(rpy[1])*cos(rpy[0])+sin(rpy[2])*sin(rpy[0]);
+  rotmat[1][0] = sin(rpy[2])*cos(rpy[1]);
+  rotmat[1][1] = sin(rpy[2])*sin(rpy[1])*sin(rpy[0])+cos(rpy[2])*cos(rpy[0]);
+  rotmat[1][2] = sin(rpy[2])*sin(rpy[1])*cos(rpy[0])-cos(rpy[2])*sin(rpy[0]);
+  rotmat[2][0] = -sin(rpy[1]);
+  rotmat[2][1] = cos(rpy[1])*sin(rpy[0]);
+  rotmat[2][2] = cos(rpy[1])*cos(rpy[0]);
+
+  // rotmat*IMURotMatrix
+  float rotmatR[3][3];
+  int i;
+  int j;
+  int k;
+  for (i=0;i<3;i++)
+  {
+    for (j=0;j<3;j++)
+    {
+      rotmatR[i][j] = 0;
+      for (k=0;k<3;k++)
+      {
+        rotmatR[i][j] += rotmat[i][k]*IMURotMatrix[k][j];
+      }
+    }
+  }
+
+  // rotmat2rpy
+  rotrpy[0] = atan2(rotmatR[2][1],rotmatR[2][2]);
+  rotrpy[1] = atan2(-rotmatR[2][0],sqrt(pow(rotmatR[3][2],2) + pow(rotmatR[2][2],2)));
+  rotrpy[2] = atan2(rotmatR[1][0],rotmatR[0][0]);
 }
 
 void offboardCtrlTask(void* param)
