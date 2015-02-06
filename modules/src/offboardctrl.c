@@ -256,7 +256,7 @@ static void rotateRPY(float* rpy, float* rotrpy)
 
   // rotmat2rpy
   rotrpy[0] = atan2(rotmatR[2][1],rotmatR[2][2]);
-  rotrpy[1] = atan2(-rotmatR[2][0],sqrt(pow(rotmatR[3][2],2) + pow(rotmatR[2][2],2)));
+  rotrpy[1] = atan2(-rotmatR[2][0],sqrt(pow(rotmatR[2][1],2) + pow(rotmatR[2][2],2)));
   rotrpy[2] = atan2(rotmatR[1][0],rotmatR[0][0]);
 }
 
@@ -269,8 +269,8 @@ void offboardCtrlTask(void* param)
   lastWakeTime = xTaskGetTickCount();
   while(1)
   { 
-    vTaskDelayUntil(&lastWakeTime, F2T(100.0));
-    updateSensors((float)(1.0/100.0));
+    vTaskDelayUntil(&lastWakeTime, F2T(200.0));
+    updateSensors((float)(1.0/200.0));
     updateThrusts();
   }
 }
