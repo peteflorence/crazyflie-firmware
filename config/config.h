@@ -65,6 +65,7 @@
 #define MEM_TASK_PRI            1
 #define PARAM_TASK_PRI          1
 #define STABILIZER_TASK_PRI     4
+#define OFFBOARDCTRL_TASK_PRI   4
 #define SYSLINK_TASK_PRI        3
 #define USBLINK_TASK_PRI        3
 //CF1

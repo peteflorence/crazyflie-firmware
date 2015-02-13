@@ -37,12 +37,15 @@
 #include "syslink.h"
 #include "crtp.h"
 #include "configblock.h"
+#include "offboardctrl.h"
+#include "console.h"
 
 static xQueueHandle crtpPacketDelivery;
 
 static bool isInit;
 
 static int radiolinkSendCRTPPacket(CRTPPacket *p);
+static int radiolinkSendCRTPPacketNoWait(CRTPPacket *p);
 static int radiolinkSetEnable(bool enable);
 static int radiolinkReceiveCRTPPacket(CRTPPacket *p);
 
@@ -51,6 +54,7 @@ static struct crtpLinkOperations radiolinkOp =
   .setEnable         = radiolinkSetEnable,
   .sendPacket        = radiolinkSendCRTPPacket,
   .receivePacket     = radiolinkReceiveCRTPPacket,
+  .sendPacketNoWait  = radiolinkSendCRTPPacketNoWait,
 };
 
 void radiolinkInit(void)
@@ -103,7 +107,17 @@ void radiolinkSyslinkDispatch(SyslinkPacket *slp)
   if (slp->type == SYSLINK_RADIO_RAW)
   {
     slp->length--; // Decrease to get CRTP size.
-    xQueueSend(crtpPacketDelivery, &slp->length, 0);
+    
+    CRTPPacket* p =  (CRTPPacket*) &slp->length;
+    if (p->port==CRTP_PORT_OFFBOARDCTRL)
+    {
+      offboardCtrlCrtpCB(p);
+    }
+    else
+    {
+      xQueueSend(crtpPacketDelivery, p, 0);
+    }
+
   }
 }
 
@@ -128,6 +142,19 @@ static int radiolinkSendCRTPPacket(CRTPPacket *p)
   memcpy(slp.data, &p->header, p->size + 1);
 
   return syslinkSendCRTPPacket(&slp);
+}
+
+static int radiolinkSendCRTPPacketNoWait(CRTPPacket *p)
+{
+  SyslinkPacket slp;
+
+  ASSERT(p->size <= CRTP_MAX_DATA_SIZE);
+
+  slp.type = SYSLINK_RADIO_RAW;
+  slp.length = p->size + 1;
+  memcpy(slp.data, &p->header, p->size + 1);
+
+  return syslinkSendPacket(&slp);
 }
 
 struct crtpLinkOperations * radiolinkGetLink()

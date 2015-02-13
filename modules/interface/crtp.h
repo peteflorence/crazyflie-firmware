@@ -176,6 +176,7 @@ struct crtpLinkOperations
   int (*receivePacket)(CRTPPacket *pk);
   bool (*isConnected)(void);
   int (*reset)(void);
+  int (*sendPacketNoWait)(CRTPPacket *pk);
 };
 
 void crtpSetLink(struct crtpLinkOperations * lk);

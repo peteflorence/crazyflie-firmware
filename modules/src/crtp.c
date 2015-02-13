@@ -46,6 +46,7 @@ static struct crtpLinkOperations nopLink = {
   .setEnable         = (void*) nopFunc,
   .sendPacket        = (void*) nopFunc,
   .receivePacket     = (void*) nopFunc,
+  .sendPacketNoWait  = (void*) nopFunc,
 }; 
 
 static struct crtpLinkOperations *link = &nopLink;
@@ -181,7 +182,7 @@ void crtpSendPacketNoWait(CRTPPacket *p)
 {
   ASSERT(p); 
   
-  link->sendPacket(p);
+  link->sendPacketNoWait(p);
 }
 
 int crtpSendPacketBlock(CRTPPacket *p)

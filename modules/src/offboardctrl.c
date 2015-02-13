@@ -15,6 +15,7 @@
 #include "imu.h"
 #include "pm.h"
 #include "debug.h"
+#include "config.h"
 
 #define OFFBOARDCTRL_UPDATE_FREQ 200.0f
 #define A_OFFSET -1.208905335853438f
@@ -37,17 +38,18 @@ static float eulerRollActual;
 static float eulerPitchActual;
 static float eulerYawActual;
 
-static float rpyX[3];
-static float rpyN[3];
-static float omegaX[3];
-static float omegaN[3];
+static float rpyX[3] = {0,0,0};
+static float rpyN[3] = {0,0,0};
+static float omegaX[3] = {0,0,0};
+static float omegaN[3] = {0,0,0};
 
 static float IMURotMatrix[3][3] = {{0.7071, -0.7071, 0},
                                    {0.7071,  0.7071, 0},
                                    {0,       0,      1}};
 
-float ROLL_KP = 3.5*180/M_PI;
-float PITCH_KP = 3.5*180/M_PI;
+// NOTE I HAVE ZEROED THE PROP GAINS!!
+float ROLL_KP = 0*3.5*180/M_PI;
+float PITCH_KP = 0*3.5*180/M_PI;
 float YAW_KP = 0.0;
 float ROLL_RATE_KP = 70*180/M_PI;
 float PITCH_RATE_KP = 70*180/M_PI; 
@@ -70,8 +72,9 @@ static float thrust4 = 0.0;
 
 static CRTPPacket pk;
 
-static void offboardCtrlCrtpCB(CRTPPacket* pk);
+void offboardCtrlCrtpCB(CRTPPacket* pk);
 static void offboardCtrlWatchdogReset(void);
+static void sendSensorData(void);
 static void updateSensors(float);
 static void updateThrusts(void);
 static void rotateGyro(float*, float*);
@@ -89,11 +92,11 @@ void offboardCtrlInit(void)
   if(isInit)
     return;
 
-  crtpInit();
   motorsInit();
   imu6Init();
   sensfusion6Init();
-  crtpRegisterPortCB(CRTP_PORT_OFFBOARDCTRL, offboardCtrlCrtpCB);
+
+  lastUpdate = xTaskGetTickCount();
 
   eulerRollActual = 0.0;
   eulerPitchActual = 0.0;
@@ -102,15 +105,21 @@ void offboardCtrlInit(void)
   gyro.y = 0.0;
   gyro.z = 0.0;
 
-  lastUpdate = xTaskGetTickCount();
-  isInactive = true;
-  isInit = true;
-
-  pk.header = CRTP_HEADER(CRTP_PORT_SENSORS, 0);
-  pk.size = 6*4;
+  inputCmd.input1 = 0.0;
+  inputCmd.input2 = 0.0;
+  inputCmd.input3 = 0.0;
+  inputCmd.input4 = 0.0;
+  inputCmd.offset = 0.0;
+  inputCmd.type = 1;
 
   xTaskCreate(offboardCtrlTask, (const signed char * const)"OFFBOARDCTRL",
-              2*configMINIMAL_STACK_SIZE, NULL, /*Piority*/2, NULL);
+              2*configMINIMAL_STACK_SIZE, NULL, OFFBOARDCTRL_TASK_PRI, NULL);
+
+  crtpInit();
+  // callback is taken care directly in the radiolink, no need to register it
+
+  isInactive = true;
+  isInit = true;
 }
 
 bool offboardCtrlTest(void)
@@ -123,10 +132,31 @@ bool offboardCtrlTest(void)
   return pass;
 }
 
-static void offboardCtrlCrtpCB(CRTPPacket* inputPk)
+void offboardCtrlCrtpCB(CRTPPacket* inputPk)
 {
   inputCmd = *((struct InputCrtpValues*)inputPk->data);
   offboardCtrlWatchdogReset();
+  updateThrusts();
+  updateSensors(1.0/OFFBOARDCTRL_UPDATE_FREQ);
+  // sendSensorData();
+}
+
+static void offboardCtrlWatchdogReset(void)
+{
+  lastUpdate = xTaskGetTickCount();
+}
+
+static void sendSensorData(void)
+{
+  pk.header = CRTP_HEADER(CRTP_PORT_SENSORS, 0);
+  pk.size = 6*4;
+  memcpy(pk.data,&(rpyN[0]),4);
+  memcpy(pk.data+4,&(rpyN[1]),4);
+  memcpy(pk.data+8,&(rpyN[2]),4);
+  memcpy(pk.data+12,&(omegaN[0]),4);
+  memcpy(pk.data+16,&(omegaN[1]),4);
+  memcpy(pk.data+20,&(omegaN[2]),4);
+  crtpSendPacketNoWait(&pk);
 }
 
 void offboardCtrlWatchdog(void)
@@ -148,15 +178,8 @@ void offboardCtrlWatchdog(void)
   }
 }
 
-static void offboardCtrlWatchdogReset(void)
-{
-  lastUpdate = xTaskGetTickCount();
-}
-
 static void updateThrusts(void)
 {
-  offboardCtrlWatchdog();
-
   if (inputCmd.type==1)
   {
     // "32bits"
@@ -231,22 +254,14 @@ static void updateSensors(float dt)
     rpyX[2] = eulerYawActual*M_PI/180.0;
     rotateRPY(rpyX,rpyN);
 
+    // pitch is inverted
+    rpyN[1] = -rpyN[1];
+
     // make omega with motor1 being front
     omegaX[0] = gyro.x*M_PI/180.0;
     omegaX[1] = gyro.y*M_PI/180.0;
     omegaX[2] = gyro.z*M_PI/180.0;
     rotateGyro(omegaX,omegaN);
-
-    // pitch is inverted
-    rpyN[1] = -rpyN[1];
-
-    memcpy(pk.data,&(rpyN[0]),4);
-    memcpy(pk.data+4,&(rpyN[1]),4);
-    memcpy(pk.data+8,&(rpyN[2]),4);
-    memcpy(pk.data+12,&(omegaN[0]),4);
-    memcpy(pk.data+16,&(omegaN[1]),4);
-    memcpy(pk.data+20,&(omegaN[2]),4);
-    crtpSendPacketNoWait(&pk);
   }
 }
 
@@ -312,7 +327,7 @@ void offboardCtrlTask(void* param)
   while(1)
   { 
     vTaskDelayUntil(&lastWakeTime, F2T(OFFBOARDCTRL_UPDATE_FREQ));
-    updateSensors(1.0/OFFBOARDCTRL_UPDATE_FREQ);
-    updateThrusts();
+
+    offboardCtrlWatchdog();
   }
 }
