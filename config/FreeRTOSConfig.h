@@ -115,6 +115,7 @@ to exclude the API function. */
 //Milliseconds to OS Ticks
 #define M2T(X) ((unsigned int)(X*(configTICK_RATE_HZ/1000.0)))
 #define F2T(X) ((unsigned int)((configTICK_RATE_HZ/X)))
+#define T2M(X) ((unsigned int)((1000.0*X)/configTICK_RATE_HZ))
 
 // DEBUG SECTION
 #define configUSE_APPLICATION_TASK_TAG  1
