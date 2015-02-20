@@ -18,8 +18,9 @@
 #include "config.h"
 
 #define OFFBOARDCTRL_WATCHDOG_FREQ 1.0f
-#define A_OFFSET -1.208905335853438f
+#define A_OFFSET 0.0f
 #define V_MAX 4.0f
+
 //#define OFFBOARDCTRL_FORMATION_X
 
 struct InputCrtpValues
@@ -79,7 +80,7 @@ static void updateThrusts(void);
 static void rotateGyro(float*, float*);
 static void rotateRPY(float*, float*);
 void offboardCtrlTask(void* param);
-static uint16_t limitThrust(int32_t value);
+static uint16_t limitThrust(float);
 
 #undef max
 #define max(a,b) ((a) > (b) ? (a) : (b))
@@ -232,21 +233,21 @@ static void updateThrusts(void)
     #endif
   }
 
-  motorsSetRatio(MOTOR_M1,limitThrust((uint32_t)thrust1));
-  motorsSetRatio(MOTOR_M2,limitThrust((uint32_t)thrust2));
-  motorsSetRatio(MOTOR_M3,limitThrust((uint32_t)thrust3));
-  motorsSetRatio(MOTOR_M4,limitThrust((uint32_t)thrust4));
+  motorsSetRatio(MOTOR_M1,limitThrust(thrust1));
+  motorsSetRatio(MOTOR_M2,limitThrust(thrust2));
+  motorsSetRatio(MOTOR_M3,limitThrust(thrust3));
+  motorsSetRatio(MOTOR_M4,limitThrust(thrust4));
 }
 
-static uint16_t limitThrust(int32_t value)
+static uint16_t limitThrust(float value)
 {
-  if(value > UINT16_MAX)
+  if(value > (float)UINT16_MAX)
   {
-    value = UINT16_MAX;
+    value = (float)UINT16_MAX;
   }
-  else if(value < 0)
+  else if(value < 0.0)
   {
-    value = 0;
+    value = 0.0;
   }
 
   return (uint16_t)value;
@@ -259,13 +260,13 @@ static void updateSensors(float dt)
   {
     // sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, dt);
     // sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
-    
+
     // // make rpy with motor1 being front
     // rpyX[0] = eulerRollActual*M_PI/180.0;
     // rpyX[1] = eulerPitchActual*M_PI/180.0;
     // rpyX[2] = eulerYawActual*M_PI/180.0;
     // rotateRPY(rpyX,rpyN);
-
+    
     // // pitch is inverted
     // rpyN[1] = -rpyN[1];
 
