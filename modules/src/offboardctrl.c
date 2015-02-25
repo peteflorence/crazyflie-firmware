@@ -18,7 +18,9 @@
 #include "config.h"
 
 #define OFFBOARDCTRL_WATCHDOG_FREQ 1.0f
-#define A_OFFSET 0.0f
+
+#define A_OFFSET 3300.0f
+#define B_OFFSET 2.8f
 #define V_MAX 4.0f
 
 //#define OFFBOARDCTRL_FORMATION_X
@@ -43,6 +45,8 @@ static float rpyX[3] = {0,0,0};
 static float rpyN[3] = {0,0,0};
 static float omegaX[3] = {0,0,0};
 static float omegaN[3] = {0,0,0};
+static float alphaX[3] = {0,0,0};
+static float alphaN[3] = {0,0,0};
 
 static float IMURotMatrix[3][3] = {{0.7071, -0.7071, 0},
                                    {0.7071,  0.7071, 0},
@@ -77,7 +81,7 @@ static float offboardCtrlWatchdogReset(void);
 static void sendSensorData(float);
 static void updateSensors(float);
 static void updateThrusts(void);
-static void rotateGyro(float*, float*);
+static void rotateVector(float*, float*);
 static void rotateRPY(float*, float*);
 void offboardCtrlTask(void* param);
 static uint16_t limitThrust(float);
@@ -104,6 +108,9 @@ void offboardCtrlInit(void)
   gyro.x = 0.0;
   gyro.y = 0.0;
   gyro.z = 0.0;
+  acc.x = 0.0;
+  acc.y = 0.0;
+  acc.z = 0.0;
 
   inputCmd.input1 = 0.0;
   inputCmd.input2 = 0.0;
@@ -152,20 +159,13 @@ static void sendSensorData(float dt)
 {
   pk.header = CRTP_HEADER(CRTP_PORT_SENSORS, 0);
   pk.size = 7*4;
-  
-  // memcpy(pk.data,&(rpyN[0]),4);
-  // memcpy(pk.data+4,&(rpyN[1]),4);
-  // memcpy(pk.data+8,&(rpyN[2]),4);
-  // memcpy(pk.data+12,&(omegaN[0]),4);
-  // memcpy(pk.data+16,&(omegaN[1]),4);
-  // memcpy(pk.data+20,&(omegaN[2]),4);
 
   memcpy(pk.data,&(omegaN[0]),4);
   memcpy(pk.data+4,&(omegaN[1]),4);
   memcpy(pk.data+8,&(omegaN[2]),4);
-  memcpy(pk.data+12,&(acc.x),4);
-  memcpy(pk.data+16,&(acc.y),4);
-  memcpy(pk.data+20,&(acc.z),4);
+  memcpy(pk.data+12,&(alphaN[0]),4);
+  memcpy(pk.data+16,&(alphaN[1]),4);
+  memcpy(pk.data+20,&(alphaN[2]),4);
   memcpy(pk.data+24,&dt,4);
 
   crtpSendPacketNoWait(&pk);
@@ -207,14 +207,14 @@ static void updateThrusts(void)
     // "omeguasqu"
     // input is omega square
     Va = pmGetBatteryVoltage();
-    omega1 = sqrt(max(0.0,inputCmd.input1 + inputCmd.offset));
-    omega2 = sqrt(max(0.0,inputCmd.input2 + inputCmd.offset));
-    omega3 = sqrt(max(0.0,inputCmd.input3 + inputCmd.offset));
-    omega4 = sqrt(max(0.0,inputCmd.input4 + inputCmd.offset));
-    thrust1 = ((V_MAX/Va)*omega1 + A_OFFSET)*10000.0;
-    thrust2 = ((V_MAX/Va)*omega2 + A_OFFSET)*10000.0;
-    thrust3 = ((V_MAX/Va)*omega3 + A_OFFSET)*10000.0;
-    thrust4 = ((V_MAX/Va)*omega4 + A_OFFSET)*10000.0;
+    omega1 = sqrt(max(0.0,inputCmd.input1 + inputCmd.offset - B_OFFSET));
+    omega2 = sqrt(max(0.0,inputCmd.input2 + inputCmd.offset - B_OFFSET));
+    omega3 = sqrt(max(0.0,inputCmd.input3 + inputCmd.offset - B_OFFSET));
+    omega4 = sqrt(max(0.0,inputCmd.input4 + inputCmd.offset - B_OFFSET));
+    thrust1 = (V_MAX/Va)*omega1*10000.0 + A_OFFSET;
+    thrust2 = (V_MAX/Va)*omega2*10000.0 + A_OFFSET;
+    thrust3 = (V_MAX/Va)*omega3*10000.0 + A_OFFSET;
+    thrust4 = (V_MAX/Va)*omega4*10000.0 + A_OFFSET;
   }
   else if (inputCmd.type==3)
   {
@@ -274,11 +274,18 @@ static void updateSensors(float dt)
     omegaX[0] = gyro.x*M_PI/180.0;
     omegaX[1] = gyro.y*M_PI/180.0;
     omegaX[2] = gyro.z*M_PI/180.0;
-    rotateGyro(omegaX,omegaN);
+    rotateVector(omegaX,omegaN);
+
+    // make alpha with motor1 being front
+    alphaX[0] = acc.x;
+    alphaX[1] = acc.y;
+    alphaX[2] = acc.z;
+    rotateVector(alphaX,alphaN);
+
   }
 }
 
-static void rotateGyro(float* omega, float* rotomega)
+static void rotateVector(float* omega, float* rotomega)
 {
   // IMURotMatrix*omega
   int i;
