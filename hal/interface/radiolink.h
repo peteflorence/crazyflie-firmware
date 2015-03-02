@@ -29,12 +29,13 @@
 
 #include <stdbool.h>
 #include "syslink.h"
+#include "crtp.h"
 
 void radioInit(void);
 bool radioTest(void);
 void radiolinkSetChannel(uint8_t channel);
 void radiolinkSetDatarate(uint8_t datarate);
-void radiolinkSyslinkDispatch(SyslinkPacket *slp);
+void radiolinkSyslinkDispatch(CRTPPacket*);
 struct crtpLinkOperations * radiolinkGetLink();
 
 

@@ -2,7 +2,6 @@
 
 #include "math.h"
 #include "string.h"
-#include "complex.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -17,7 +16,7 @@
 #include "debug.h"
 #include "config.h"
 
-#define OFFBOARDCTRL_WATCHDOG_FREQ 1.0f
+#define OFFBOARDCTRL_FREQ 1000.0f // 1kHz
 
 #define A_OFFSET 3300.0f
 #define B_OFFSET 2.8f
@@ -48,9 +47,9 @@ static float omegaN[3] = {0,0,0};
 static float alphaX[3] = {0,0,0};
 static float alphaN[3] = {0,0,0};
 
-static float IMURotMatrix[3][3] = {{0.7071, -0.7071, 0},
-                                   {0.7071,  0.7071, 0},
-                                   {0,       0,      1}};
+static float IMURotMatrix[3][3] = {{0.707106781186548, -0.707106781186547, 0  },
+                                   {0.707106781186547,  0.707106781186548, 0  },
+                                   {0,                  0,                 1.0}};
 
 float ROLL_KP = 3.5*180/M_PI;
 float PITCH_KP = 3.5*180/M_PI;
@@ -61,8 +60,10 @@ float YAW_RATE_KP = 50*180/M_PI;
 
 static bool isInit;
 static bool isInactive;
-static uint32_t lastUpdate;
+static uint32_t lastInputUpdate;
 static struct InputCrtpValues inputCmd;
+static uint32_t lastSensorsUpdate;
+static float sensorsDt;
 
 static float Va = V_MAX;
 static float omega1 = 0.0;
@@ -74,16 +75,17 @@ static float thrust2 = 0.0;
 static float thrust3 = 0.0;
 static float thrust4 = 0.0;
 
-static CRTPPacket pk;
-
-void offboardCtrlCrtpCB(CRTPPacket* pk);
-static float offboardCtrlWatchdogReset(void);
-static void sendSensorData(float);
-static void updateSensors(float);
+void offboardCtrlCrtpCB(CRTPPacket*);
+static void offboardCtrlWatchdogReset(void);
 static void updateThrusts(void);
+
+void getSensorsPacket(CRTPPacket*);
+static void updateSensors(void);
+
+void offboardCtrlTask(void* param);
+
 static void rotateVector(float*, float*);
 static void rotateRPY(float*, float*);
-void offboardCtrlTask(void* param);
 static uint16_t limitThrust(float);
 
 #undef max
@@ -100,7 +102,9 @@ void offboardCtrlInit(void)
   imu6Init();
   sensfusion6Init();
 
-  lastUpdate = xTaskGetTickCount();
+  lastInputUpdate = xTaskGetTickCount();
+  lastSensorsUpdate = xTaskGetTickCount();
+  sensorsDt = 0.0;
 
   eulerRollActual = 0.0;
   eulerPitchActual = 0.0;
@@ -122,8 +126,6 @@ void offboardCtrlInit(void)
   xTaskCreate(offboardCtrlTask, (const signed char * const)"OFFBOARDCTRL",
               2*configMINIMAL_STACK_SIZE, NULL, OFFBOARDCTRL_TASK_PRI, NULL);
 
-  crtpInit();
-
   isInactive = true;
   isInit = true;
 }
@@ -131,7 +133,6 @@ void offboardCtrlInit(void)
 bool offboardCtrlTest(void)
 {
   bool pass = true;
-  pass &= crtpTest();
   pass &= motorsTest();
   pass &= imu6Test();
   pass &= sensfusion6Test();
@@ -141,39 +142,30 @@ bool offboardCtrlTest(void)
 void offboardCtrlCrtpCB(CRTPPacket* inputPk)
 {
   inputCmd = *((struct InputCrtpValues*)inputPk->data);
-  float dtUpdate = offboardCtrlWatchdogReset();
-  updateSensors(dtUpdate);
-  sendSensorData(dtUpdate);
-  updateThrusts();
+  offboardCtrlWatchdogReset();
 }
 
-static float offboardCtrlWatchdogReset(void)
+static void offboardCtrlWatchdogReset(void)
 {
-  uint32_t newCount = xTaskGetTickCount();
-  float dtUpdate = (float)(T2M(newCount)-T2M(lastUpdate));
-  lastUpdate = newCount;
-  return dtUpdate;
+  lastInputUpdate = xTaskGetTickCount();
 }
 
-static void sendSensorData(float dt)
+void getSensorsPacket(CRTPPacket* pk)
 {
-  pk.header = CRTP_HEADER(CRTP_PORT_SENSORS, 0);
-  pk.size = 7*4;
-
-  memcpy(pk.data,&(omegaN[0]),4);
-  memcpy(pk.data+4,&(omegaN[1]),4);
-  memcpy(pk.data+8,&(omegaN[2]),4);
-  memcpy(pk.data+12,&(alphaN[0]),4);
-  memcpy(pk.data+16,&(alphaN[1]),4);
-  memcpy(pk.data+20,&(alphaN[2]),4);
-  memcpy(pk.data+24,&dt,4);
-
-  crtpSendPacketNoWait(&pk);
+  pk->header = CRTP_HEADER(CRTP_PORT_SENSORS, 0);
+  pk->size = 7*4;
+  memcpy(pk->data,&(omegaN[0]),4);
+  memcpy(pk->data+4,&(omegaN[1]),4);
+  memcpy(pk->data+8,&(omegaN[2]),4);
+  memcpy(pk->data+12,&(alphaN[0]),4);
+  memcpy(pk->data+16,&(alphaN[1]),4);
+  memcpy(pk->data+20,&(alphaN[2]),4);
+  memcpy(pk->data+24,&sensorsDt,4);
 }
 
 void offboardCtrlWatchdog(void)
 {
-  uint32_t ticktimeSinceUpdate = xTaskGetTickCount() - lastUpdate;
+  uint32_t ticktimeSinceUpdate = xTaskGetTickCount() - lastInputUpdate;
   if (ticktimeSinceUpdate > OFFBOARDCTRL_WDT_TIMEOUT_SHUTDOWN)
   {
     inputCmd.input1 = 0.0;
@@ -183,7 +175,6 @@ void offboardCtrlWatchdog(void)
     inputCmd.offset = 0.0;
     inputCmd.type = 1;
     isInactive = true;
-    updateThrusts();
   }
   else
   {
@@ -196,7 +187,6 @@ static void updateThrusts(void)
   if (inputCmd.type==1)
   {
     // "32bits"
-    // input is raw thrust values
     thrust1 = inputCmd.input1 + inputCmd.offset;
     thrust2 = inputCmd.input2 + inputCmd.offset;
     thrust3 = inputCmd.input3 + inputCmd.offset;
@@ -205,7 +195,6 @@ static void updateThrusts(void)
   else if (inputCmd.type==2)
   {
     // "omeguasqu"
-    // input is omega square
     Va = pmGetBatteryVoltage();
     omega1 = sqrt(max(0.0,inputCmd.input1 + inputCmd.offset - B_OFFSET));
     omega2 = sqrt(max(0.0,inputCmd.input2 + inputCmd.offset - B_OFFSET));
@@ -219,7 +208,6 @@ static void updateThrusts(void)
   else if (inputCmd.type==3)
   {
     // "onboardpd"
-    // input only contains an offset, use onboard PD
     #ifdef OFFBOARDCTRL_FORMATION_X
       thrust1 = 0.5*ROLL_KP*rpyX[0] + 0.5*PITCH_KP*rpyX[1] + YAW_KP*rpyX[2] + 0.5*ROLL_RATE_KP*omegaX[0] + 0.5*PITCH_RATE_KP*omegaX[1] + YAW_RATE_KP*omegaX[2] + inputCmd.offset;
       thrust2 = 0.5*ROLL_KP*rpyX[0] - 0.5*PITCH_KP*rpyX[1] - YAW_KP*rpyX[2] + 0.5*ROLL_RATE_KP*omegaX[0] - 0.5*PITCH_RATE_KP*omegaX[1] - YAW_RATE_KP*omegaX[2] + inputCmd.offset;
@@ -253,22 +241,29 @@ static uint16_t limitThrust(float value)
   return (uint16_t)value;
 }
 
-static void updateSensors(float dt)
+static void updateSensors(void)
 {
+
   imu6Read(&gyro, &acc);
+  sensorsDt = (float)(T2M(xTaskGetTickCount())-T2M(lastSensorsUpdate));
+  lastSensorsUpdate = xTaskGetTickCount();
+
   if (imu6IsCalibrated())
   {
-    // sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, dt);
-    // sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
 
-    // // make rpy with motor1 being front
-    // rpyX[0] = eulerRollActual*M_PI/180.0;
-    // rpyX[1] = eulerPitchActual*M_PI/180.0;
-    // rpyX[2] = eulerYawActual*M_PI/180.0;
-    // rotateRPY(rpyX,rpyN);
-    
-    // // pitch is inverted
-    // rpyN[1] = -rpyN[1];
+    if (inputCmd.type==3)
+    {
+      // using the onboard pd
+      sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, sensorsDt);
+      sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
+      // make rpy with motor1 being front
+      rpyX[0] = eulerRollActual*M_PI/180.0;
+      rpyX[1] = eulerPitchActual*M_PI/180.0;
+      rpyX[2] = eulerYawActual*M_PI/180.0;
+      rotateRPY(rpyX,rpyN);
+      // pitch is inverted
+      rpyN[1] = -rpyN[1];
+    }
 
     // make omega with motor1 being front
     omegaX[0] = gyro.x*M_PI/180.0;
@@ -346,9 +341,11 @@ void offboardCtrlTask(void* param)
   lastWakeTime = xTaskGetTickCount();
   while(1)
   { 
-    vTaskDelayUntil(&lastWakeTime, F2T(OFFBOARDCTRL_WATCHDOG_FREQ));
+    vTaskDelayUntil(&lastWakeTime, F2T(OFFBOARDCTRL_FREQ));
+
+    updateSensors();
+
     offboardCtrlWatchdog();
-    sendSensorData(0); // if a controller is waiting for an initial sensor reading, 
-                       //not 0 dt since we didn't update the sensors
+    updateThrusts();
   }
 }

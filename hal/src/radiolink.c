@@ -102,23 +102,9 @@ void radiolinkSetDatarate(uint8_t datarate)
   syslinkSendPacket(&slp);
 }
 
-void radiolinkSyslinkDispatch(SyslinkPacket *slp)
+void radiolinkSyslinkDispatch(CRTPPacket *pk)
 {
-  if (slp->type == SYSLINK_RADIO_RAW)
-  {
-    slp->length--; // Decrease to get CRTP size.
-    
-    CRTPPacket* p =  (CRTPPacket*) &slp->length;
-    if (p->port==CRTP_PORT_OFFBOARDCTRL)
-    {
-      offboardCtrlCrtpCB(p);
-    }
-    else
-    {
-      xQueueSend(crtpPacketDelivery, p, 0);
-    }
-
-  }
+  xQueueSend(crtpPacketDelivery, pk, 0);
 }
 
 static int radiolinkReceiveCRTPPacket(CRTPPacket *p)

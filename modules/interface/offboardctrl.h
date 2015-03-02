@@ -10,5 +10,6 @@ void offboardCtrlInit(void);
 bool offboardCtrlTest(void);
 void offboardCtrlTask(void*);
 void offboardCtrlCrtpCB(CRTPPacket*);
+void getSensorsPacket(CRTPPacket*);
 
 #endif /* OFFBOARDCTRL_H_ */

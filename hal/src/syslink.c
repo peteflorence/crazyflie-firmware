@@ -44,6 +44,7 @@
 #include "ledseq.h"
 #include "pm.h"
 #include "ow.h"
+#include "offboardctrl.h"
 
 static bool isInit = false;
 static uint8_t sendBuffer[64];
@@ -55,6 +56,7 @@ static void syslinkRouteIncommingPacket(SyslinkPacket *slp);
 static xQueueHandle  txQueue;
 static xSemaphoreHandle syslinkAccess;
 static SyslinkPacket txPacket;
+static CRTPPacket sensorsPacket;
 
 /* Radio task handles the CRTP packet transfers as well as the radio link
  * specific communications (eg. Scann and ID ports, communication error handling
@@ -156,10 +158,38 @@ static void syslinkRouteIncommingPacket(SyslinkPacket *slp)
   switch (groupType)
   {
     case SYSLINK_RADIO_GROUP:
-      radiolinkSyslinkDispatch(slp);
-      ledseqRun(LINK_LED, seq_linkup);
-      if (xQueueReceive(txQueue, &txPacket, 0) == pdTRUE)
-        syslinkSendPacket(&txPacket);
+      
+      // modifications to handle sensor and motor commands fast
+      if (slp->type == SYSLINK_RADIO_RAW)
+      {
+        slp->length--; // Decrease to get CRTP size.
+        CRTPPacket* p =  (CRTPPacket*) &slp->length;
+
+        if (p->port==CRTP_PORT_OFFBOARDCTRL)
+        {
+          offboardCtrlCrtpCB(p);
+          return;
+        }
+        else if (p->port==CRTP_PORT_SENSORS)
+        {
+          getSensorsPacket(&sensorsPacket);
+          ASSERT(sensorsPacket.size <= CRTP_MAX_DATA_SIZE);
+          SyslinkPacket slpSensors;
+          slpSensors.type = SYSLINK_RADIO_RAW;
+          slpSensors.length = sensorsPacket.size + 1;
+          memcpy(slpSensors.data, &(sensorsPacket.header), sensorsPacket.size + 1);
+          syslinkSendPacket(&slpSensors);
+          return;
+        }
+        else
+        {
+          radiolinkSyslinkDispatch(p);
+          ledseqRun(LINK_LED, seq_linkup);
+          if (xQueueReceive(txQueue, &txPacket, 0) == pdTRUE)
+            syslinkSendPacket(&txPacket);
+        }
+      }
+
       break;
     case SYSLINK_PM_GROUP:
       pmSyslinkUpdate(slp);
