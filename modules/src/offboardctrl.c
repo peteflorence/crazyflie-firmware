@@ -64,12 +64,12 @@ static float IMURotMatrix[3][3] = {{0.707106781186548, -0.707106781186547, 0  },
                                    {0.707106781186547,  0.707106781186548, 0  },
                                    {0,                  0,                 1.0}};
 
-float ROLL_KP = 10*3.5*180/M_PI;
-float PITCH_KP = 10*3.5*180/M_PI;
-float YAW_KP = 10*3.5*180/M_PI;
+float ROLL_KP = 3.5*180/M_PI;
+float PITCH_KP = 3.5*180/M_PI;
+float YAW_KP = 3.5*180/M_PI;
 float ROLL_RATE_KP = 70*180/M_PI;
 float PITCH_RATE_KP = 70*180/M_PI; 
-float YAW_RATE_KP = 100*180/M_PI;
+float YAW_RATE_KP = 50*180/M_PI;
 
 static bool isInit;
 static bool isInactive;
@@ -293,8 +293,8 @@ static void updateSensors(void)
 
   imu6Read(&gyro, &acc);
 
-  if (imu6IsCalibrated())
-  {
+  //if (imu6IsCalibrated())
+  //{
 
     #ifdef POSITION_CONTROL
       sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, 1.0/POSITION_CONTROL_FREQ);
@@ -332,7 +332,9 @@ static void updateSensors(void)
     alphaX[1] = acc.y;
     alphaX[2] = acc.z;
     rotateVector(alphaX,alphaN);
-  }
+
+  //}
+
 }
 
 static void rotateVector(float* omega, float* rotomega)
