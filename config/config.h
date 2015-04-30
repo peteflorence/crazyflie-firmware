@@ -43,6 +43,8 @@
 #define CONFIG_H_
 #include "nrf24l01.h"
 
+#define POSITION_CONTROL
+
 #ifdef STM32F4XX
   #define P_NAME "Crazyflie 2.0 Rev.C"
   #define QUAD_FORMATION_X
@@ -67,8 +69,13 @@
 #define STABILIZER_TASK_PRI     4
 
 // The ones that matter for offboard //
-#define OFFBOARDCTRL_TASK_PRI   4
-#define SYSLINK_TASK_PRI        4
+#ifdef POSITION_CONTROL
+ 	#define OFFBOARDCTRL_TASK_PRI	4
+ 	#define SYSLINK_TASK_PRI		3
+#else
+	#define OFFBOARDCTRL_TASK_PRI   4
+	#define SYSLINK_TASK_PRI        4
+#endif
 ///////////////////////////////////////
 
 #define USBLINK_TASK_PRI        3

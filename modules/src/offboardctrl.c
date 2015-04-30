@@ -16,13 +16,15 @@
 #include "debug.h"
 #include "config.h"
 
-#define OFFBOARDCTRL_FREQ 1000.0f // 1kHz
+#define OFFBOARDCTRL_FREQ 1000.0f // Hz will just stop at its actual upper bound that is much lower
+#define POSITION_CONTROL_FREQ 250.0f // Hz
 
 #define A_OFFSET 3300.0f
 #define B_OFFSET 2.8f
 #define V_MAX 4.0f
 
 //#define OFFBOARDCTRL_FORMATION_X
+#define POSITION_CONTROL
 
 struct InputCrtpValues
 {
@@ -32,6 +34,17 @@ struct InputCrtpValues
   float input4;
   float offset;
   int type;
+} __attribute__((packed));
+
+struct PositionInputCrtpValues
+{
+  float desiredroll;
+  float desiredpitch;
+  float desiredyaw;
+  float desiredwx;
+  float desiredwy;
+  float desiredwz;
+  float thrust;
 } __attribute__((packed));
 
 static Axis3f gyro; // Gyro axis data in deg/s
@@ -51,17 +64,18 @@ static float IMURotMatrix[3][3] = {{0.707106781186548, -0.707106781186547, 0  },
                                    {0.707106781186547,  0.707106781186548, 0  },
                                    {0,                  0,                 1.0}};
 
-float ROLL_KP = 3.5*180/M_PI;
-float PITCH_KP = 3.5*180/M_PI;
-float YAW_KP = 0.0;
+float ROLL_KP = 10*3.5*180/M_PI;
+float PITCH_KP = 10*3.5*180/M_PI;
+float YAW_KP = 10*3.5*180/M_PI;
 float ROLL_RATE_KP = 70*180/M_PI;
 float PITCH_RATE_KP = 70*180/M_PI; 
-float YAW_RATE_KP = 50*180/M_PI;
+float YAW_RATE_KP = 100*180/M_PI;
 
 static bool isInit;
 static bool isInactive;
 static uint32_t lastInputUpdate;
 static struct InputCrtpValues inputCmd;
+static struct PositionInputCrtpValues positionInputCmd;
 static uint32_t lastSensorsUpdate;
 static float sensorsDt;
 
@@ -74,6 +88,8 @@ static float thrust1 = 0.0;
 static float thrust2 = 0.0;
 static float thrust3 = 0.0;
 static float thrust4 = 0.0;
+
+static float nominal_thrust = 0.0;
 
 void offboardCtrlCrtpCB(CRTPPacket*);
 static void offboardCtrlWatchdogReset(void);
@@ -123,6 +139,14 @@ void offboardCtrlInit(void)
   inputCmd.offset = 0.0;
   inputCmd.type = 1;
 
+  positionInputCmd.desiredroll = 0.0;
+  positionInputCmd.desiredpitch = 0.0;
+  positionInputCmd.desiredyaw = 0.0;
+  positionInputCmd.desiredwx = 0.0;
+  positionInputCmd.desiredwy = 0.0;
+  positionInputCmd.desiredwz = 0.0;
+  positionInputCmd.thrust = 0.0;
+
   xTaskCreate(offboardCtrlTask, (const signed char * const)"OFFBOARDCTRL",
               2*configMINIMAL_STACK_SIZE, NULL, OFFBOARDCTRL_TASK_PRI, NULL);
 
@@ -141,7 +165,11 @@ bool offboardCtrlTest(void)
 
 void offboardCtrlCrtpCB(CRTPPacket* inputPk)
 {
-  inputCmd = *((struct InputCrtpValues*)inputPk->data);
+  #ifdef POSITION_CONTROL
+    positionInputCmd = *((struct PositionInputCrtpValues*)inputPk->data);
+  #else
+    inputCmd = *((struct InputCrtpValues*)inputPk->data);
+  #endif
   offboardCtrlWatchdogReset();
 }
 
@@ -168,13 +196,23 @@ void offboardCtrlWatchdog(void)
   uint32_t ticktimeSinceUpdate = xTaskGetTickCount() - lastInputUpdate;
   if (ticktimeSinceUpdate > OFFBOARDCTRL_WDT_TIMEOUT_SHUTDOWN)
   {
-    inputCmd.input1 = 0.0;
-    inputCmd.input2 = 0.0;
-    inputCmd.input3 = 0.0;
-    inputCmd.input4 = 0.0;
-    inputCmd.offset = 0.0;
-    inputCmd.type = 1;
-    isInactive = true;
+    #ifdef POSITION_CONTROL
+      positionInputCmd.desiredroll = 0.0;
+      positionInputCmd.desiredpitch = 0.0;
+      positionInputCmd.desiredyaw = 0.0;
+      positionInputCmd.desiredwx = 0.0;
+      positionInputCmd.desiredwy = 0.0;
+      positionInputCmd.desiredwz = 0.0;
+      positionInputCmd.thrust = 0.0;
+    #else
+      inputCmd.input1 = 0.0;
+      inputCmd.input2 = 0.0;
+      inputCmd.input3 = 0.0;
+      inputCmd.input4 = 0.0;
+      inputCmd.offset = 0.0;
+      inputCmd.type = 1;
+      isInactive = true;
+    #endif
   }
   else
   {
@@ -184,42 +222,51 @@ void offboardCtrlWatchdog(void)
 
 static void updateThrusts(void)
 {
-  if (inputCmd.type==1)
-  {
-    // "32bits"
-    thrust1 = inputCmd.input1 + inputCmd.offset;
-    thrust2 = inputCmd.input2 + inputCmd.offset;
-    thrust3 = inputCmd.input3 + inputCmd.offset;
-    thrust4 = inputCmd.input4 + inputCmd.offset; 
-  } 
-  else if (inputCmd.type==2)
-  {
-    // "omeguasqu"
+  #ifdef POSITION_CONTROL
     Va = pmGetBatteryVoltage();
-    omega1 = sqrt(max(0.0,inputCmd.input1 + inputCmd.offset - B_OFFSET));
-    omega2 = sqrt(max(0.0,inputCmd.input2 + inputCmd.offset - B_OFFSET));
-    omega3 = sqrt(max(0.0,inputCmd.input3 + inputCmd.offset - B_OFFSET));
-    omega4 = sqrt(max(0.0,inputCmd.input4 + inputCmd.offset - B_OFFSET));
-    thrust1 = (V_MAX/Va)*omega1*10000.0 + A_OFFSET;
-    thrust2 = (V_MAX/Va)*omega2*10000.0 + A_OFFSET;
-    thrust3 = (V_MAX/Va)*omega3*10000.0 + A_OFFSET;
-    thrust4 = (V_MAX/Va)*omega4*10000.0 + A_OFFSET;
-  }
-  else if (inputCmd.type==3)
-  {
-    // "onboardpd"
-    #ifdef OFFBOARDCTRL_FORMATION_X
-      thrust1 = 0.5*ROLL_KP*rpyX[0] + 0.5*PITCH_KP*rpyX[1] + YAW_KP*rpyX[2] + 0.5*ROLL_RATE_KP*omegaX[0] + 0.5*PITCH_RATE_KP*omegaX[1] + YAW_RATE_KP*omegaX[2] + inputCmd.offset;
-      thrust2 = 0.5*ROLL_KP*rpyX[0] - 0.5*PITCH_KP*rpyX[1] - YAW_KP*rpyX[2] + 0.5*ROLL_RATE_KP*omegaX[0] - 0.5*PITCH_RATE_KP*omegaX[1] - YAW_RATE_KP*omegaX[2] + inputCmd.offset;
-      thrust3 = -0.5*ROLL_KP*rpyX[0] - 0.5*PITCH_KP*rpyX[1] + YAW_KP*rpyX[2] - 0.5*ROLL_RATE_KP*omegaX[0] - 0.5*PITCH_RATE_KP*omegaX[1] + YAW_RATE_KP*omegaX[2] + inputCmd.offset;
-      thrust4 = -0.5*ROLL_KP*rpyX[0] + 0.5*PITCH_KP*rpyX[1] - YAW_KP*rpyX[2] - 0.5*ROLL_RATE_KP*omegaX[0] + 0.5*PITCH_RATE_KP*omegaX[1] - YAW_RATE_KP*omegaX[2] + inputCmd.offset;
-    #else // OFFBOARDCTRL_FORMATION_NORMAL
-      thrust1 = PITCH_KP*rpyN[1] + YAW_KP*rpyN[2] + PITCH_RATE_KP*omegaN[1] + YAW_RATE_KP*omegaN[2] + inputCmd.offset;
-      thrust2 = ROLL_KP*rpyN[0] - YAW_KP*rpyN[2] + ROLL_RATE_KP*omegaN[0] - YAW_RATE_KP*omegaN[2] + inputCmd.offset;
-      thrust3 = -PITCH_KP*rpyN[1] + YAW_KP*rpyN[2] - PITCH_RATE_KP*omegaN[1] + YAW_RATE_KP*omegaN[2] + inputCmd.offset;
-      thrust4 = -ROLL_KP*rpyN[0] - YAW_KP*rpyN[2] - ROLL_RATE_KP*omegaN[0] - YAW_RATE_KP*omegaN[2] + inputCmd.offset;
-    #endif
-  }
+    nominal_thrust = (V_MAX/Va)*sqrt(max(0.0,positionInputCmd.thrust-B_OFFSET))*10000.0+A_OFFSET;
+    thrust1 = PITCH_KP*(rpyN[1]-positionInputCmd.desiredpitch) + YAW_KP*(rpyN[2]-positionInputCmd.desiredyaw) + PITCH_RATE_KP*(omegaN[1]-positionInputCmd.desiredwy) + YAW_RATE_KP*(omegaN[2]-positionInputCmd.desiredwz) + nominal_thrust;
+    thrust2 = ROLL_KP*(rpyN[0]-positionInputCmd.desiredroll) - YAW_KP*(rpyN[2]-positionInputCmd.desiredyaw) + ROLL_RATE_KP*(omegaN[0]-positionInputCmd.desiredwx) - YAW_RATE_KP*(omegaN[2]-positionInputCmd.desiredwz) + nominal_thrust;
+    thrust3 = -PITCH_KP*(rpyN[1]-positionInputCmd.desiredpitch) + YAW_KP*(rpyN[2]-positionInputCmd.desiredyaw) - PITCH_RATE_KP*(omegaN[1]-positionInputCmd.desiredwy) + YAW_RATE_KP*(omegaN[2]-positionInputCmd.desiredwz) + nominal_thrust;
+    thrust4 = -ROLL_KP*(rpyN[0]-positionInputCmd.desiredroll) - YAW_KP*(rpyN[2]-positionInputCmd.desiredyaw) - ROLL_RATE_KP*(omegaN[0]-positionInputCmd.desiredwx) - YAW_RATE_KP*(omegaN[2]-positionInputCmd.desiredwz) + nominal_thrust;
+  #else
+    if (inputCmd.type==1)
+    {
+      // "32bits"
+      thrust1 = inputCmd.input1 + inputCmd.offset;
+      thrust2 = inputCmd.input2 + inputCmd.offset;
+      thrust3 = inputCmd.input3 + inputCmd.offset;
+      thrust4 = inputCmd.input4 + inputCmd.offset; 
+    } 
+    else if (inputCmd.type==2)
+    {
+      // "omeguasqu"
+      Va = pmGetBatteryVoltage();
+      omega1 = sqrt(max(0.0,inputCmd.input1 + inputCmd.offset - B_OFFSET));
+      omega2 = sqrt(max(0.0,inputCmd.input2 + inputCmd.offset - B_OFFSET));
+      omega3 = sqrt(max(0.0,inputCmd.input3 + inputCmd.offset - B_OFFSET));
+      omega4 = sqrt(max(0.0,inputCmd.input4 + inputCmd.offset - B_OFFSET));
+      thrust1 = (V_MAX/Va)*omega1*10000.0 + A_OFFSET;
+      thrust2 = (V_MAX/Va)*omega2*10000.0 + A_OFFSET;
+      thrust3 = (V_MAX/Va)*omega3*10000.0 + A_OFFSET;
+      thrust4 = (V_MAX/Va)*omega4*10000.0 + A_OFFSET;
+    }
+    else if (inputCmd.type==3)
+    {
+      // "onboardpd"
+      #ifdef OFFBOARDCTRL_FORMATION_X
+        thrust1 = 0.5*ROLL_KP*rpyX[0] + 0.5*PITCH_KP*rpyX[1] + YAW_KP*rpyX[2] + 0.5*ROLL_RATE_KP*omegaX[0] + 0.5*PITCH_RATE_KP*omegaX[1] + YAW_RATE_KP*omegaX[2] + inputCmd.offset;
+        thrust2 = 0.5*ROLL_KP*rpyX[0] - 0.5*PITCH_KP*rpyX[1] - YAW_KP*rpyX[2] + 0.5*ROLL_RATE_KP*omegaX[0] - 0.5*PITCH_RATE_KP*omegaX[1] - YAW_RATE_KP*omegaX[2] + inputCmd.offset;
+        thrust3 = -0.5*ROLL_KP*rpyX[0] - 0.5*PITCH_KP*rpyX[1] + YAW_KP*rpyX[2] - 0.5*ROLL_RATE_KP*omegaX[0] - 0.5*PITCH_RATE_KP*omegaX[1] + YAW_RATE_KP*omegaX[2] + inputCmd.offset;
+        thrust4 = -0.5*ROLL_KP*rpyX[0] + 0.5*PITCH_KP*rpyX[1] - YAW_KP*rpyX[2] - 0.5*ROLL_RATE_KP*omegaX[0] + 0.5*PITCH_RATE_KP*omegaX[1] - YAW_RATE_KP*omegaX[2] + inputCmd.offset;
+      #else // OFFBOARDCTRL_FORMATION_NORMAL
+        thrust1 = PITCH_KP*rpyN[1] + YAW_KP*rpyN[2] + PITCH_RATE_KP*omegaN[1] + YAW_RATE_KP*omegaN[2] + inputCmd.offset;
+        thrust2 = ROLL_KP*rpyN[0] - YAW_KP*rpyN[2] + ROLL_RATE_KP*omegaN[0] - YAW_RATE_KP*omegaN[2] + inputCmd.offset;
+        thrust3 = -PITCH_KP*rpyN[1] + YAW_KP*rpyN[2] - PITCH_RATE_KP*omegaN[1] + YAW_RATE_KP*omegaN[2] + inputCmd.offset;
+        thrust4 = -ROLL_KP*rpyN[0] - YAW_KP*rpyN[2] - ROLL_RATE_KP*omegaN[0] - YAW_RATE_KP*omegaN[2] + inputCmd.offset;
+      #endif
+    }
+  #endif
 
   motorsSetRatio(MOTOR_M1,limitThrust(thrust1));
   motorsSetRatio(MOTOR_M2,limitThrust(thrust2));
@@ -245,25 +292,34 @@ static void updateSensors(void)
 {
 
   imu6Read(&gyro, &acc);
-  sensorsDt = (float)(T2M(xTaskGetTickCount())-T2M(lastSensorsUpdate));
-  lastSensorsUpdate = xTaskGetTickCount();
 
   if (imu6IsCalibrated())
   {
 
-    if (inputCmd.type==3)
-    {
-      // using the onboard pd
-      sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, sensorsDt);
+    #ifdef POSITION_CONTROL
+      sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, 1.0/POSITION_CONTROL_FREQ);
       sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
-      // make rpy with motor1 being front
       rpyX[0] = eulerRollActual*M_PI/180.0;
       rpyX[1] = eulerPitchActual*M_PI/180.0;
       rpyX[2] = eulerYawActual*M_PI/180.0;
       rotateRPY(rpyX,rpyN);
       // pitch is inverted
       rpyN[1] = -rpyN[1];
-    }
+    #else
+      if (inputCmd.type==3)
+      {
+        // using the onboard pd
+        sensfusion6UpdateQ(gyro.x, gyro.y, gyro.z, acc.x, acc.y, acc.z, 1.0/OFFBOARDCTRL_FREQ);
+        sensfusion6GetEulerRPY(&eulerRollActual, &eulerPitchActual, &eulerYawActual);
+        // make rpy with motor1 being front
+        rpyX[0] = eulerRollActual*M_PI/180.0;
+        rpyX[1] = eulerPitchActual*M_PI/180.0;
+        rpyX[2] = eulerYawActual*M_PI/180.0;
+        rotateRPY(rpyX,rpyN);
+        // pitch is inverted
+        rpyN[1] = -rpyN[1];
+      }
+    #endif
 
     // make omega with motor1 being front
     omegaX[0] = gyro.x*M_PI/180.0;
@@ -276,7 +332,6 @@ static void updateSensors(void)
     alphaX[1] = acc.y;
     alphaX[2] = acc.z;
     rotateVector(alphaX,alphaN);
-
   }
 }
 
@@ -341,7 +396,11 @@ void offboardCtrlTask(void* param)
   lastWakeTime = xTaskGetTickCount();
   while(1)
   { 
-    vTaskDelayUntil(&lastWakeTime, F2T(OFFBOARDCTRL_FREQ));
+    #ifdef POSITION_CONTROL
+      vTaskDelayUntil(&lastWakeTime, F2T(POSITION_CONTROL_FREQ));
+    #else
+      vTaskDelayUntil(&lastWakeTime, F2T(OFFBOARDCTRL_FREQ));
+    #endif
 
     updateSensors();
 
