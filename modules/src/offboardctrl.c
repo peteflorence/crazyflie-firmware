@@ -66,9 +66,9 @@ static float IMURotMatrix[3][3] = {{0.707106781186548, -0.707106781186547, 0  },
 
 float ROLL_KP = 3.5*180/M_PI;
 float PITCH_KP = 3.5*180/M_PI;
-float YAW_KP = 3.5*180/M_PI;
-float ROLL_RATE_KP = 70*180/M_PI;
-float PITCH_RATE_KP = 70*180/M_PI; 
+float YAW_KP = 5*3.5*180/M_PI;
+float ROLL_RATE_KP = .5*70*180/M_PI;
+float PITCH_RATE_KP = .5*70*180/M_PI; 
 float YAW_RATE_KP = 50*180/M_PI;
 
 static bool isInit;
