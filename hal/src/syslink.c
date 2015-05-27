@@ -172,6 +172,7 @@ static void syslinkRouteIncommingPacket(SyslinkPacket *slp)
         }
         else if (p->port==CRTP_PORT_SENSORS)
         {
+          offboardCtrlCrtpUpdateViconYaw(p);
           getSensorsPacket(&sensorsPacket);
           ASSERT(sensorsPacket.size <= CRTP_MAX_DATA_SIZE);
           SyslinkPacket slpSensors;

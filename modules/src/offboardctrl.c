@@ -47,6 +47,14 @@ struct PositionInputCrtpValues
   float thrust;
 } __attribute__((packed));
 
+
+struct SensorRequest
+{
+  float viconYaw;
+  int   useViconYaw;
+} __attribute__((packed));
+
+
 static Axis3f gyro; // Gyro axis data in deg/s
 static Axis3f acc;  // Accelerometer axis data in mG
 static float eulerRollActual;
@@ -55,6 +63,8 @@ static float eulerYawActual;
 
 static float rpyX[3] = {0,0,0};
 static float rpyN[3] = {0,0,0};
+static float viconYaw = 0.0;
+static int   useViconYaw = 0;
 static float omegaX[3] = {0,0,0};
 static float omegaN[3] = {0,0,0};
 static float alphaX[3] = {0,0,0};
@@ -76,6 +86,7 @@ static bool isInactive;
 static uint32_t lastInputUpdate;
 static struct InputCrtpValues inputCmd;
 static struct PositionInputCrtpValues positionInputCmd;
+static struct SensorRequest sensorRequestPk;
 static uint32_t lastSensorsUpdate;
 static float sensorsDt;
 
@@ -171,6 +182,13 @@ void offboardCtrlCrtpCB(CRTPPacket* inputPk)
     inputCmd = *((struct InputCrtpValues*)inputPk->data);
   #endif
   offboardCtrlWatchdogReset();
+}
+
+void offboardCtrlCrtpUpdateViconYaw(CRTPPacket* inputPk)
+{
+  sensorRequestPk = *((struct SensorRequest*)inputPk->data);
+  viconYaw = sensorRequestPk.viconYaw;
+  useViconYaw = sensorRequestPk.useViconYaw;
 }
 
 static void offboardCtrlWatchdogReset(void)
@@ -305,6 +323,10 @@ static void updateSensors(void)
       rotateRPY(rpyX,rpyN);
       // pitch is inverted
       rpyN[1] = -rpyN[1];
+      if (useViconYaw==1)
+      {
+        rpyN[2] = viconYaw;
+      }
     #else
       if (inputCmd.type==3)
       {
@@ -318,6 +340,10 @@ static void updateSensors(void)
         rotateRPY(rpyX,rpyN);
         // pitch is inverted
         rpyN[1] = -rpyN[1];
+        if (useViconYaw==1)
+        {
+          rpyN[2] = viconYaw;
+        }
       }
     #endif
 
